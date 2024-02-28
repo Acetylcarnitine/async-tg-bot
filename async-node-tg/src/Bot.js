@@ -1,5 +1,3 @@
-require("dotenv").config();
-
 // это функция засыпания
 const sleep = (delay) => {
     return new Promise(resolve => {
@@ -13,19 +11,18 @@ class EndPointManager {
         callback: callback
     })
 
-    createCallback = (body, callback) => {
+    createCallback = (filter, callback) => ({
+        filter: filter,
+        callback: callback
+    })
 
-    }
-
-    createTextFilter = () => {
-
-    }
+    createTextFilter = this.createCallback;
 }
 
 const endPointManager = new EndPointManager();
 
 // это класс нашего крутого бота
-class AsyncTgBot {
+module.exports = class AsyncTgBot {
     constructor(token) {
         this.TOKEN = token;
         this.lastUpdate = 0;
@@ -53,11 +50,11 @@ class AsyncTgBot {
         }
     }
 
-    sendMessage = async (chatId, text, replyMarkup = {}) => {
+    sendMessage = async (chatId, text, replyMarkup) => {
         // creating url for request
         let url = `https://api.telegram.org/bot${this.TOKEN}/sendMessage?chat_id=${chatId}&text=${text}`
         if (replyMarkup) {
-            url += `&reply_markup=${JSON.stringify(replyMarkup)}`
+            url += `&reply_markup=${replyMarkup.exportJSON()}`
         }
 
         // sending request
@@ -72,14 +69,19 @@ class AsyncTgBot {
 
     _processNewUpdates = async (newUpdates) => {
         newUpdates.map(value => {
-            if (value.message !== undefined && value.message.text[0] === "/") {
+            if (value.callback_query) {
+                this._processCallbackQuery(value);
+            }
+            else if (value.message && value.message.text[0] === "/") {
                 this._processCommands(value.message);
+            } else {
+                this._processTextFilter(value.message);
             }
         });
     }
 
     _processCommands = async (message) => {
-        const commands = this.endPoints.commands
+        const commands = this.endPoints.commands;
         for (let i = 0; i < commands.length; i++) {
             if (message.text === `/${commands[i].body}`) {
                 commands[i].callback(message);
@@ -88,37 +90,39 @@ class AsyncTgBot {
         }
     }
 
-    addCommand = async (body, callback) => {
+    _processCallbackQuery = async (call) => {
+        const callbacks = this.endPoints.callbackQuery;
+        for (let i = 0; i < callbacks.length; i++) {
+            if (callbacks[i].filter(call.callback_query.data)) {
+                callbacks[i].callback(call);
+                return;
+            }
+        }
+    }
+
+    _processTextFilter = async (message) => {
+        const filters = this.endPoints.text;
+        for (let i = 0; i < filters.length; i++) {
+            if (message.text === filters[i].body) {
+                filters[i].callback(message);
+                return;
+            }
+        }
+    }
+
+    addCommand = (body, callback) => {
         this.endPoints.commands.push(endPointManager.createCommand(body, callback));
+    }
+
+    addCallback = (filter, callback) => {
+        this.endPoints.callbackQuery.push(endPointManager.createCallback(filter, callback));
+    }
+
+    addTextFilter = (body, callback) => {
+        this.endPoints.text.push(endPointManager.createTextFilter(body, callback));
     }
 
     _setPolling = () => {
         this.nonStop = !this.nonStop;
     }
 }
-
-// эти строчки придется писать пользователю нашего фреймворка
-markup = {
-    inline_keyboard: [
-            [
-                {
-                    text: "Cосать",
-                    callback_data: "minet"
-                }
-            ],
-    ]
-}
-
-console.log(markup);
-bot = new AsyncTgBot(process.env.BOT_TOKEN);
-bot.addCommand('start',
-    async message => {
-        await bot.sendMessage(message.chat.id, "Привет, пососешь?", markup);
-    }
-).then();
-bot.addCommand('sosat',
-    async message => {
-        await bot.sendMessage(message.chat.id, "Ооооо да, наконец-то");
-    }
-).then();
-bot.infinityPolling().then();
