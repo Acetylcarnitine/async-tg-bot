@@ -1,28 +1,14 @@
-// это функция засыпания
+const endPointManager = require("../utils/EndPointManager");
+
+// sleep function
+// for making a timeout for executing callbacks
 const sleep = (delay) => {
     return new Promise(resolve => {
         setTimeout(resolve, delay);
     })
 }
 
-class EndPointManager {
-    createCommand = (body, callback) => ({
-        body: body,
-        callback: callback
-    })
-
-    createCallback = (filter, callback) => ({
-        filter: filter,
-        callback: callback
-    })
-
-    createTextFilter = this.createCallback;
-}
-
-const endPointManager = new EndPointManager();
-
-// это класс нашего крутого бота
-module.exports = class AsyncTgBot {
+class AsyncTgBot {
     constructor(token) {
         this.TOKEN = token;
         this.lastUpdate = 0;
@@ -63,7 +49,41 @@ module.exports = class AsyncTgBot {
         if (result.status === 200) {
             return result.json();
         } else {
-            throw new Error("Fatal Error: message not sanded");
+            throw new Error("Bad Request: message not sanded");
+        }
+    }
+
+    answerCallbackQuery = async (callbackQueryId, text, showAlert, url) => {
+        let uri = `https://api.telegram.org/bot${this.TOKEN}/answerCallbackQuery?callback_query_id=${callbackQueryId}`;
+
+        // adding optional variables to request
+        if (text !== undefined) {
+            uri += `&text=${text}`
+        }
+        if (showAlert !== undefined) {
+            uri += `&show_alert=${showAlert}`
+        }
+        if (url !== undefined) {
+            uri += `&url=${url}`
+        }
+
+        // sending request
+        const result = await fetch(uri);
+        // throw error if had wrong answer
+        if (result.status !== 200) {
+            throw new Error("Bad Request: query do not answered");
+        }
+    }
+
+    editMessageText = async (chatId, messageId, text, replyMarkup) => {
+        let url = `https://api.telegram.org/bot${this.TOKEN}/editMessageText?chat_id=${chatId}&message_id=${messageId}&text=${text}`
+        if (replyMarkup !== undefined) {
+            url += `&reply_markup=${replyMarkup.exportJSON()}`
+        }
+
+        const result = await fetch(url);
+        if (result.status !== 200) {
+            throw new Error("Bad Request: Message not modified")
         }
     }
 
@@ -83,9 +103,17 @@ module.exports = class AsyncTgBot {
     _processCommands = async (message) => {
         const commands = this.endPoints.commands;
         for (let i = 0; i < commands.length; i++) {
-            if (message.text === `/${commands[i].body}`) {
-                commands[i].callback(message);
-                return;
+            if (~message.text.indexOf(`/${commands[i].body}`)) {
+                try {
+                    if (commands[i].sep === undefined) {
+                        commands[i].callback(message);
+                    } else {
+                        commands[i].callback(message, (await commands[i].parseArgs(message.text)));
+                    }
+                    return;
+                } catch (e) {
+                    await this.sendMessage(message.chat.id, commands[i].errMessage);
+                }
             }
         }
     }
@@ -94,7 +122,7 @@ module.exports = class AsyncTgBot {
         const callbacks = this.endPoints.callbackQuery;
         for (let i = 0; i < callbacks.length; i++) {
             if (callbacks[i].filter(call.callback_query.data)) {
-                callbacks[i].callback(call);
+                callbacks[i].callback(call.callback_query);
                 return;
             }
         }
@@ -103,26 +131,28 @@ module.exports = class AsyncTgBot {
     _processTextFilter = async (message) => {
         const filters = this.endPoints.text;
         for (let i = 0; i < filters.length; i++) {
-            if (message.text === filters[i].body) {
+            if (filters[i].filter(message.text)) {
                 filters[i].callback(message);
                 return;
             }
         }
     }
 
-    addCommand = (body, callback) => {
-        this.endPoints.commands.push(endPointManager.createCommand(body, callback));
+    addCommand = (body, callback, sep, args, err) => {
+        this.endPoints.commands.push(
+            endPointManager.createCommand(
+                body, callback, sep, args, err
+            )
+        );
     }
 
     addCallback = (filter, callback) => {
         this.endPoints.callbackQuery.push(endPointManager.createCallback(filter, callback));
     }
 
-    addTextFilter = (body, callback) => {
-        this.endPoints.text.push(endPointManager.createTextFilter(body, callback));
-    }
-
-    _setPolling = () => {
-        this.nonStop = !this.nonStop;
+    addTextFilter = (filter, callback) => {
+        this.endPoints.text.push(endPointManager.createTextFilter(filter, callback));
     }
 }
+
+module.exports = AsyncTgBot;

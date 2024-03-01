@@ -1,4 +1,4 @@
-module.exports = class InlineKeyboardMarkup {
+class InlineKeyboardMarkup {
     constructor(keyboard = []) {
         this.inline_keyboard = keyboard;
     }
@@ -7,3 +7,5 @@ module.exports = class InlineKeyboardMarkup {
         return JSON.stringify(this);
     }
 }
+
+module.exports = InlineKeyboardMarkup
